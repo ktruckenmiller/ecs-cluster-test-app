@@ -3,19 +3,19 @@
   gather_facts: false
   vars:
     branch: master
-    owner: ktruckenmiller
-    repo_name: my-ip
+    owner: jamf
+    repo_name: ecs-cluster-test-app
     region: us-east-2
     codebuild_params:
-      Subnets: "subnet-0c00ee77,subnet-a6954dcf,subnet-d65b579c"
-      Vpc: vpc-9aab64f3
+      Subnets: "subnet-123,subnet-123,subnet-123"
+      Vpc:
       ClusterName: dev-jamf
       ServiceName: my-ip
       SubDomain: jamf
       Count: "8"
-      ALBSGBadgeFromCluster: sg-0e76fbe6ca3610b09
-      HostedZone: ZU20SE53GVCYV
-      HostedZoneName: clustermaestro.com
+      ALBSGBadgeFromCluster: sg-123
+      HostedZone: 123
+      HostedZoneName: something-jamf.com
       Priority: "1"
 
   tasks:
