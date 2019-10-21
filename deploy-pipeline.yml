@@ -1,0 +1,36 @@
+---
+- hosts: localhost
+  gather_facts: false
+  vars:
+    branch: master
+    owner: ktruckenmiller
+    repo_name: my-ip
+    region: us-east-2
+    codebuild_params:
+      Subnets: "subnet-0c00ee77,subnet-a6954dcf,subnet-d65b579c"
+      Vpc: vpc-9aab64f3
+      ClusterName: dev-jamf
+      ServiceName: my-ip
+      SubDomain: jamf
+      Count: "8"
+      ALBSGBadgeFromCluster: sg-0e76fbe6ca3610b09
+      HostedZone: ZU20SE53GVCYV
+      HostedZoneName: clustermaestro.com
+      Priority: "1"
+
+  tasks:
+    - name: jinja-it
+      template:
+        src: codepipeline/pipeline.yml.j2
+        dest: codepipeline/pipeline.yml
+
+    - name: cloudformation
+      cloudformation:
+        stack_name: "{{repo_name}}-pipeline"
+        state: present
+        region: "{{region}}"
+        template: codepipeline/pipeline.yml
+        template_parameters:
+          Branch: "{{branch}}"
+          Owner: "{{owner}}"
+          RepoName: "{{repo_name}}"
