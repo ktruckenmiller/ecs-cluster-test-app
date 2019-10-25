@@ -1,0 +1,36 @@
+---
+- hosts: localhost
+  gather_facts: false
+  vars:
+    branch: master
+    owner: jamf
+    repo_name: ecs-cluster-test-app
+    region: us-east-2
+    codebuild_params:
+      Subnets: "subnet-123,subnet-123,subnet-123"
+      Vpc:
+      ClusterName: dev-jamf
+      ServiceName: my-ip
+      SubDomain: jamf
+      Count: "8"
+      ALBSGBadgeFromCluster: sg-123
+      HostedZone: 123
+      HostedZoneName: something-jamf.com
+      Priority: "1"
+
+  tasks:
+    - name: jinja-it
+      template:
+        src: codepipeline/pipeline.yml.j2
+        dest: codepipeline/pipeline.yml
+
+    - name: cloudformation
+      cloudformation:
+        stack_name: "{{repo_name}}-pipeline"
+        state: present
+        region: "{{region}}"
+        template: codepipeline/pipeline.yml
+        template_parameters:
+          Branch: "{{branch}}"
+          Owner: "{{owner}}"
+          RepoName: "{{repo_name}}"

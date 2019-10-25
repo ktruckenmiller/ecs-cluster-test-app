@@ -1,0 +1,220 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: An ECS deploy of a service
+Parameters:
+  ClusterName:
+    Type: String
+  Vpc:
+    Type: String
+  Subnets:
+    Type: String
+  ServiceName:
+    Type: String
+  Version:
+    Type: String
+    Default: latest
+  Environment:
+    Type: String
+    Default: dev
+  Count:
+    Type: String
+  ALBSGBadgeFromCluster:
+    Type: String
+  HostedZone:
+    Type: String
+  HostedZoneName:
+    Type: String
+  Priority:
+    Type: String
+  SubDomain:
+    Type: String
+
+
+Resources:
+  ARecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      AliasTarget:
+        HostedZoneId: !GetAtt ALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ALB.DNSName
+      HostedZoneId: !Sub ${HostedZone}
+      Name: !Sub '${SubDomain}.${HostedZoneName}.'
+      Type: A
+      Weight: 100
+      SetIdentifier: !Sub useast2
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Subnets: !Split [',', !Ref Subnets]
+      SecurityGroups:
+        - !Ref ALBSGBadgeFromCluster
+        - !Ref SG
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: 30
+        - Key: routing.http2.enabled
+          Value: true
+  SG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for our demo
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: -1
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup80
+      # - Type: fixed-response
+      #   FixedResponseConfig:
+      #     ContentType: text/html
+      #     MessageBody: Please bear with us as we do some maintenance.
+      #     StatusCode: 200
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+
+  TargetGroup80:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      UnhealthyThresholdCount: 4
+      HealthCheckPath: "/health"
+      Matcher:
+        HttpCode: 200
+      Port: 1
+      Protocol: HTTP
+      VpcId: !Ref Vpc
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
+        - Key: slow_start.duration_seconds
+          Value: 30
+
+  # ListenerRule80:
+  #   Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  #   Properties:
+  #     Actions:
+  #       - Type: forward
+  #         TargetGroupArn: !Ref TargetGroup80
+  #     Conditions:
+  #       - Field: host-header
+  #         Values:
+  #         - !Sub ${ServiceName}.${HostedZoneName}
+  #     ListenerArn: !Ref Listener
+  #     Priority: !Sub ${Priority}
+
+  # ListenerCertificate:
+  #   Type: AWS::ElasticLoadBalancingV2::ListenerCertificate
+  #   Properties:
+  #     Certificates:
+  #         - CertificateArn: !Sub "arn:aws:acm:${AWS::Region}:${AWS::AccountId}:certificate/${CertId}"
+  #     ListenerArn: !ImportValue kloudcover-alb:ListenerRule443
+  ServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "ecs.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        - PolicyName: ecs-service
+          PolicyDocument:
+            Statement:
+              - Action:
+                  - elasticloadbalancing:DeregisterInstancesFromLoadBalancer
+                  - elasticloadbalancing:DeregisterTargets
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:RegisterInstancesWithLoadBalancer
+                  - elasticloadbalancing:Describe*
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTargetHealth
+                  - ec2:Describe*
+                  - ec2:AuthorizeSecurityGroupIngress
+                Effect: Allow
+                Resource: "*"
+  Service:
+    DependsOn:
+      # - ListenerRule80
+      - Role
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ClusterName
+      DesiredCount: !Ref Count
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
+      LoadBalancers:
+        - ContainerName: !Sub ${ServiceName}
+          ContainerPort: 3000
+          TargetGroupArn: !Ref TargetGroup80
+      Role: !GetAtt ServiceRole.Arn
+      HealthCheckGracePeriodSeconds: 10
+      PlacementStrategies:
+        - Type: spread
+          Field: instanceId
+      TaskDefinition: !Ref Task
+  Logs:
+    Type: "AWS::Logs::LogGroup"
+    Properties:
+      LogGroupName: !Sub ${AWS::StackName}
+      RetentionInDays: 7
+  Task:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      TaskRoleArn: !Ref Role
+      ContainerDefinitions:
+        - Name: !Sub ${ServiceName}
+          Cpu: 0
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/my-ip:${Version}
+          MemoryReservation: 256
+          Environment:
+            - Name: SSM_PATH
+              Value: !Sub /${ServiceName}/${Environment}
+          PortMappings:
+            - ContainerPort: 3000
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub ${AWS::StackName}
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: !Sub ${ServiceName}
+
+  Role:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-servicerole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "ecs-tasks.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: '/'
+      Policies:
+        - PolicyName: "ssm"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                Resource:
+                  - "*"
+              - Effect: "Allow"
+                Action:
+                  - 'ssm:*'
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ServiceName}/${Environment}/*"
