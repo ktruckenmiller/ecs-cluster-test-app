@@ -39,6 +39,7 @@ put-pipeline:
 put-pipeline-friend:
 	docker run -it --rm \
 	-e IAM_ROLE \
+	-e AWS_DEFAULT_REGION=us-east-2 \
 	-v ${PWD}:/work \
 	-w /work \
 	ktruckenmiller/ansible \
